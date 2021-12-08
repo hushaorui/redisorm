@@ -140,9 +140,13 @@ public abstract class RedisOrmTemplateAdapter implements RedisOrmExecutorIF {
                 // 需要查询的字段中没有id字段，我们直接将id设置到对象中
                 FieldDesc idFieldDesc = classDesc.getIdFieldDesc();
                 try {
-                    idFieldDesc.getSetMethod().invoke(instance, id);
+                    if (idFieldDesc.isPub()) {
+                        idFieldDesc.getField().set(instance, id);
+                    } else {
+                        idFieldDesc.getSetMethod().invoke(instance, id);
+                    }
                 } catch (IllegalAccessException | InvocationTargetException e) {
-                    throw new RedisOrmDataException(String.format("class:%s method:%s invoke failed", instance.getClass().getName(), idFieldDesc.getSetMethod().getName()), e);
+                    throw new RedisOrmDataException(String.format("class:%s method:%s invoke failed", instance.getClass().getName(), idFieldDesc.getName()), e);
                 }
             }
         }
@@ -402,10 +406,6 @@ public abstract class RedisOrmTemplateAdapter implements RedisOrmExecutorIF {
      * 将字符串解析为对应类型的对象
      */
     private Object parseStringToObject(String fieldValueString, FieldDesc fieldDesc) {
-        Method setMethod = fieldDesc.getSetMethod();
-        if (setMethod == null) {
-            return null;
-        }
         // 字段的类型，如果存在泛型，则数组长度大于1
         Class<?>[] fieldTypes = fieldDesc.getFieldTypes();
         // 获取对应的类型解析器
@@ -425,29 +425,42 @@ public abstract class RedisOrmTemplateAdapter implements RedisOrmExecutorIF {
     /** 从对象中获取对应字段的值转化后的字符串 */
     private String getStringValueFromInstance(Object instance, FieldDesc fieldDesc) throws RedisOrmDataException {
         Method getMethod = fieldDesc.getGetMethod();
+        Object value;
+        Class<?> fieldType;
         if (getMethod == null) {
-            return null;
-        }
-        try {
-            Object value = getMethod.invoke(instance);
-            if (value == null) {
-                return null;
-            }
-            // get方法返回值类型，也就是字段类型
-            Class<?> returnType = getMethod.getReturnType();
-            RedisOrmConverter redisOrmConverter = converterMap.get(returnType.getName());
-            if (redisOrmConverter == null) {
-                if (defaultConverter != null) {
-                    return defaultConverter.serialize(value);
-                } else {
-                    // 没有找到对应的转换器，直接toString方法
-                    return value.toString();
+            if (fieldDesc.isPub()) {
+                // 字段是public，可以直接获取值
+                try {
+                    fieldType = fieldDesc.getField().getType();
+                    value = fieldDesc.getField().get(instance);
+                } catch (IllegalAccessException e) {
+                    throw new RedisOrmDataException(String.format("class: %s field: %s get failed", instance.getClass().getName(), fieldDesc.getField().getName()), e);
                 }
             } else {
-                return redisOrmConverter.serialize(value);
+                return null;
             }
-        } catch (IllegalAccessException | InvocationTargetException e) {
-            throw new RedisOrmDataException(String.format("class: %s method: %s invoke failed", instance.getClass().getName(), getMethod.getName()), e);
+        } else {
+            try {
+                fieldType = getMethod.getReturnType();
+                value = getMethod.invoke(instance);
+            } catch (IllegalAccessException | InvocationTargetException e) {
+                throw new RedisOrmDataException(String.format("class: %s method: %s invoke failed", instance.getClass().getName(), getMethod.getName()), e);
+            }
+        }
+
+        if (value == null) {
+            return null;
+        }
+        RedisOrmConverter redisOrmConverter = converterMap.get(fieldType.getName());
+        if (redisOrmConverter == null) {
+            if (defaultConverter != null) {
+                return defaultConverter.serialize(value);
+            } else {
+                // 没有找到对应的转换器，直接toString方法
+                return value.toString();
+            }
+        } else {
+            return redisOrmConverter.serialize(value);
         }
     }
 
@@ -499,9 +512,18 @@ public abstract class RedisOrmTemplateAdapter implements RedisOrmExecutorIF {
         }
         Method setMethod = fieldDesc.getSetMethod();
         try {
-            setMethod.invoke(instance, fieldValue);
+            if (setMethod == null) {
+                if (fieldDesc.isPub()) {
+                    // 字段是public，直接设值
+                    fieldDesc.getField().set(instance, fieldValue);
+                } else {
+                    return false;
+                }
+            } else {
+                setMethod.invoke(instance, fieldValue);
+            }
         } catch (IllegalAccessException |InvocationTargetException e) {
-            throw new RedisOrmDataException(String.format("class: %s method: %s invoke failed", instanceClass, setMethod.getName()), e);
+            throw new RedisOrmDataException(String.format("class: %s field:%s set value failed", instanceClass, fieldDesc.getName()), e);
         }
         return true;
     }

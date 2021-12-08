@@ -16,6 +16,10 @@ public class FieldDesc {
      */
     private Field field;
     /**
+     * 字段是否是public
+     */
+    private boolean pub;
+    /**
      * 保存数据时使用的名称
      */
     private String name;
@@ -56,6 +60,14 @@ public class FieldDesc {
 
     public void setField(Field field) {
         this.field = field;
+    }
+
+    public boolean isPub() {
+        return pub;
+    }
+
+    public void setPub(boolean pub) {
+        this.pub = pub;
     }
 
     public String getName() {

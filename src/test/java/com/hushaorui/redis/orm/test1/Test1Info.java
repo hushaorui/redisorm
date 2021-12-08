@@ -11,6 +11,7 @@ public class Test1Info extends Test1ParentInfo {
     private String phone;
     @RedisOrmProp(alia = "mail")
     private String email;
+    public int age;
 
     public String getName() {
         return name;

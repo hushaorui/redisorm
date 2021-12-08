@@ -148,6 +148,7 @@ public class RedisOrmAloneTemplateTest {
         test1Info.setEmail("123@163.com");
         test1Info.setPhone("110");
         test1Info.setAddress("shanghai");
+        test1Info.age = 19;
         try {
             aloneTemplate.put(test1Info);
         } catch (RedisOrmDataException e) {
@@ -160,7 +161,7 @@ public class RedisOrmAloneTemplateTest {
         try {
             Test1Info test1Info = aloneTemplate.get(Test1Info.class, "李梅");
             System.out.println(JSONArray.toJSONString(test1Info));
-            //{"address":"shanghai","email":"123@163.com","name":"李梅","phone":"110"}
+            //{"address":"shanghai","age":19,"email":"123@163.com","name":"李梅","phone":"110"}
         } catch (RedisOrmDataException e) {
             e.printStackTrace();
         }

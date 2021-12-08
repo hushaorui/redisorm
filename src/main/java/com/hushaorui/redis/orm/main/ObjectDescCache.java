@@ -225,21 +225,7 @@ class ObjectDescCache {
                     fieldDesc.setFieldTypes(setMethod.getParameterTypes());
                 }
             } else {
-                Type genericType = field.getGenericType();
-                if (genericType instanceof ParameterizedType) {
-                    ParameterizedType parameterizedType = (ParameterizedType) genericType;
-                    Type[] actualTypeArguments = parameterizedType.getActualTypeArguments();
-                    Class<?>[] fieldTypes = new Class<?>[actualTypeArguments.length + 1];
-                    fieldTypes[0] = field.getType();
-                    for (int i = 0; i < actualTypeArguments.length; i++) {
-                        try {
-                            fieldTypes[i + 1] = Class.forName(actualTypeArguments[i].getTypeName());
-                        } catch (ClassNotFoundException ignore) {}
-                    }
-                    fieldDesc.setFieldTypes(fieldTypes);
-                } else {
-                    fieldDesc.setFieldTypes(new Class<?>[] {field.getType()});
-                }
+                handleFieldType(field, fieldDesc);
             }
 
             fieldDesc.setGetMethod(getMethod);
@@ -256,17 +242,53 @@ class ObjectDescCache {
                 // 静态或 final字段跳过
                 continue;
             }
-            String fieldName = field.getName();
-            if (finishedFieldName.contains(fieldName)) {
+            ReferenceString fieldName = new ReferenceString();
+            fieldName.value = field.getName();
+            if (finishedFieldName.contains(fieldName.value)) {
                 continue;
             }
-            finishedFieldName.add(fieldName);
-            // TODO
+            finishedFieldName.add(fieldName.value);
+            // 该字段是否是id
+            ReferenceBoolean isIdField = new ReferenceBoolean();
+
+            // 创建字段的描述对象
+            FieldDesc fieldDesc = new FieldDesc();
+            // 该字段是public
+            fieldDesc.setPub(true);
+            if (isRedisOrmObj) {
+                handleField(field, classDesc, propMap, fieldDesc, fieldName, isIdField);
+            }
+            fieldDesc.setName(fieldName.value);
+            fieldDesc.setField(field);
+            fieldDesc.setOwner(clazz);
+            handleFieldType(field, fieldDesc);
+            if (! isIdField.value) {
+                // 只将非id字段放入其中
+                propMap.put(fieldName.value, fieldDesc);
+            }
         }
         if (isRedisOrmObj && classDesc.getIdFieldDesc() == null) {
             throw new RedisOrmJsonException("No RedisOrmId in RedisOrmObj, class: " + clazz.getName());
         }
         return classDesc;
+    }
+
+    private void handleFieldType(Field field, FieldDesc fieldDesc) {
+        Type genericType = field.getGenericType();
+        if (genericType instanceof ParameterizedType) {
+            ParameterizedType parameterizedType = (ParameterizedType) genericType;
+            Type[] actualTypeArguments = parameterizedType.getActualTypeArguments();
+            Class<?>[] fieldTypes = new Class<?>[actualTypeArguments.length + 1];
+            fieldTypes[0] = field.getType();
+            for (int i = 0; i < actualTypeArguments.length; i++) {
+                try {
+                    fieldTypes[i + 1] = Class.forName(actualTypeArguments[i].getTypeName());
+                } catch (ClassNotFoundException ignore) {}
+            }
+            fieldDesc.setFieldTypes(fieldTypes);
+        } else {
+            fieldDesc.setFieldTypes(new Class<?>[] {field.getType()});
+        }
     }
 
     private void handleField(Field field, ClassDesc classDesc, Map<String, FieldDesc> propMap, FieldDesc fieldDesc,
