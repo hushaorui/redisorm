@@ -4,4 +4,5 @@
     若使用StringRedisTemplate作为redis连接，可使用 RedisOrmSpringRedisTemplate ，将StringRedisTemplate注入即可。
 3， 框架的配置类为RedisOrmTemplateConfig，可自定义其中的属性，如类型转换器等。
 4， pojo类需要用到的注解： @RedisOrmId, @RedisOrmIgnore, @RedisOrmObj, @RedisOrmProp, @RedisOrmSoftCache .
-5,  test目录下有框架的简单使用方法，可自行查看。
+5， test目录下有框架的简单使用方法，可自行查看。
+6， 项目必须依赖：com.alibaba:fastjson
