@@ -31,10 +31,6 @@ public class FieldDesc {
      * set方法
      */
     private Method setMethod;
-    /**
-     * 是否使用soft缓存
-     */
-    private boolean useSoftCache;
 
     /**
      * 字段是否是id
@@ -92,14 +88,6 @@ public class FieldDesc {
 
     public void setSetMethod(Method setMethod) {
         this.setMethod = setMethod;
-    }
-
-    public boolean isUseSoftCache() {
-        return useSoftCache;
-    }
-
-    public void setUseSoftCache(boolean useSoftCache) {
-        this.useSoftCache = useSoftCache;
     }
 
     public boolean isIdField() {

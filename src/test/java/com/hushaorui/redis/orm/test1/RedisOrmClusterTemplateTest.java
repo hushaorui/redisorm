@@ -25,7 +25,7 @@ public class RedisOrmClusterTemplateTest {
         int connectionTimeout = 2000;
         int soTimeout = 2000;
         int maxAttempts = 5;
-        String password = "xxxxxxx";
+        String password = "Morlia3659";
         GenericObjectPoolConfig genericObjectPoolConfig = new GenericObjectPoolConfig();
         JedisCluster jedisCluster = new JedisCluster(hostAndPorts, connectionTimeout, soTimeout, maxAttempts, password, genericObjectPoolConfig);
         clusterTemplate = new RedisOrmClusterTemplate(jedisCluster);
@@ -58,6 +58,8 @@ public class RedisOrmClusterTemplateTest {
             Test1User test1User = clusterTemplate.get(Test1User.class, "jack");
             System.out.println(JSONArray.toJSONString(test1User));
             //{"admin":true,"createTime":1637832279853,"password":"123456","username":"jack"}
+            Test1User user2 = clusterTemplate.get(Test1User.class, "jack", "admin");
+            System.out.println(JSONArray.toJSONString(user2));
         } catch (RedisOrmDataException e) {
             e.printStackTrace();
         }
