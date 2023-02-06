@@ -7,11 +7,13 @@ import com.hushaorui.redis.orm.common.define.RedisOrmExecutorIF;
 import com.hushaorui.redis.orm.config.RedisOrmTemplateConfig;
 import com.hushaorui.redis.orm.exception.RedisOrmDataException;
 
+import java.lang.ref.SoftReference;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * 适配模板
@@ -26,6 +28,14 @@ public abstract class RedisOrmTemplateAdapter implements RedisOrmExecutorIF {
     /** 默认类型解析器 */
     private RedisOrmConverter<Object> defaultConverter;
     /**
+     * 软引用缓存
+     */
+    private Map<String, SoftReference<ConcurrentHashMap<String, String>>> softCacheMap = new ConcurrentHashMap<>();;
+    /**
+     * 当前软引用缓存miss次数
+     */
+    private volatile AtomicInteger softCacheMissCount = new AtomicInteger(0);
+    /**
      * 所有的类型转换器
      */
     private Map<String, RedisOrmConverter<?>> converterMap = new ConcurrentHashMap<>();
@@ -35,9 +45,6 @@ public abstract class RedisOrmTemplateAdapter implements RedisOrmExecutorIF {
     }
 
     public RedisOrmTemplateAdapter(RedisOrmTemplateConfig templateConfig) {
-        if (templateConfig == null) {
-            throw new NullPointerException("config cant not be null");
-        }
         this.templateConfig = templateConfig;
         redisOrmLog = new RedisOrmLog(templateConfig.getLogLevel(), templateConfig.getLogPrintStream());
         converterMap.putAll(templateConfig.getConverters());
@@ -48,17 +55,26 @@ public abstract class RedisOrmTemplateAdapter implements RedisOrmExecutorIF {
 
     @Override
     public boolean exist(String globalNS, Class<?> pojoClass, Object id) throws RedisOrmDataException {
-        // 获取类描述对象
         ClassDesc classDesc = objectDescCache.getRedisOrmClassDesc(pojoClass);
-        // 计算得到字段存储的key的前缀
         String fieldKey = getRedisKeyPrefix(templateConfig.getDataKeyPrefix(), globalNS, classDesc.getNamespace(), classDesc.getName())
                 + classDesc.getIdFieldDesc().getName();
-        // 将id转为字符串类型
         String idString = String.valueOf(id);
-        // 获取id对应的值
-        String idValue = hGet(fieldKey, idString);
-        redisOrmLog.debug("Redis operation occurs: hGet, class:%s, fieldKey:%s, id:%s", pojoClass.getName(), fieldKey, idString);
-        return idValue != null;
+        // id字段是默认使用soft缓存的，这里只要判断总开关就行
+        if (templateConfig.isUseSoftCache()) {
+            String fieldValueString = getValueFromCache(fieldKey, idString);
+            if (fieldValueString == null) {
+                String idValue = hGet(fieldKey, idString);
+                redisOrmLog.debug("Redis operation occurs: hGet, class:%s, fieldKey:%s, id:%s", pojoClass.getName(), fieldKey, idString);
+                addOrUpdateCache(fieldKey, idString, idValue);
+                return idValue != null;
+            } else {
+                return true;
+            }
+        } else {
+            String idValue = hGet(fieldKey, idString);
+            redisOrmLog.debug("Redis operation occurs: hGet, class:%s, fieldKey:%s, id:%s", pojoClass.getName(), fieldKey, idString);
+            return idValue != null;
+        }
     }
 
     @Override
@@ -261,12 +277,14 @@ public abstract class RedisOrmTemplateAdapter implements RedisOrmExecutorIF {
         String idFieldKey = redisHashKeyPrefix + classDesc.getIdFieldDesc().getName();
         hDel(idFieldKey, idString);
         redisOrmLog.debug("Redis operation occurs: hDel, class:%s, fieldKey:%s, id:%s", pojoClass.getName(), idFieldKey, idString);
+        addOrUpdateCache(idFieldKey, idString, null);
 
         // 再删除其他字段
         for (FieldDesc fieldDesc : propMap.values()) {
             String fieldKey = redisHashKeyPrefix + fieldDesc.getName();
             hDel(fieldKey, idString);
             redisOrmLog.debug("Redis operation occurs: hDel, class:%s, fieldKey:%s, id:%s", pojoClass.getName(), fieldKey, idString);
+            addOrUpdateCache(fieldKey, idString, null);
         }
     }
 
@@ -298,6 +316,8 @@ public abstract class RedisOrmTemplateAdapter implements RedisOrmExecutorIF {
             String fieldKey = redisHashKeyPrefix + fieldDesc.getName();
             hDel(fieldKey, idString);
             redisOrmLog.debug("Redis operation occurs: hDel, class:%s, fieldKey:%s, id:%s", pojoClass.getName(), fieldKey, idString);
+            // 最后从缓存中删除，必须在数据库操作的后面，防止另一个线程在缓存中获取不到直接从数据库中查询了又放入了缓存中
+            addOrUpdateCache(fieldKey, idString, null);
         }
     }
 
@@ -311,6 +331,7 @@ public abstract class RedisOrmTemplateAdapter implements RedisOrmExecutorIF {
         // 直接将整个hash删除
         del(idFieldKey);
         redisOrmLog.debug("Redis operation occurs: del, class:%s, fieldKey:%s", pojoClass.getName(), idFieldKey);
+        deleteCache(idFieldKey);
 
         // 所有的非id字段描述集合
         Map<String, FieldDesc> propMap = classDesc.getPropMap();
@@ -319,9 +340,67 @@ public abstract class RedisOrmTemplateAdapter implements RedisOrmExecutorIF {
             // 直接将整个hash删除
             del(fieldKey);
             redisOrmLog.debug("Redis operation occurs: del, class:%s, fieldKey:%s", pojoClass.getName(), fieldKey);
+            deleteCache(fieldKey);
         }
     }
 
+    @Override
+    public void clearSoftCache() {
+        if (softCacheMap != null) {
+            softCacheMap.clear();
+            redisOrmLog.info("softCacheMap have been cleared");
+        }
+    }
+
+    /**
+     * 删除一整个key的缓存
+     */
+    private void deleteCache(String key) {
+        softCacheMap.remove(key);
+    }
+
+    /**
+     * 添加或更新缓存
+     */
+    private void addOrUpdateCache(String key1, String key2, String value) {
+        SoftReference<ConcurrentHashMap<String, String>> softReference = softCacheMap.get(key1);
+        ConcurrentHashMap<String, String> concurrentHashMap;
+        if (softReference == null && value != null) {
+            // 第一次存储缓存数据
+            concurrentHashMap = new ConcurrentHashMap<>();
+            softReference = new SoftReference<>(concurrentHashMap);
+            softCacheMap.put(key1, softReference);
+        } else if (softReference != null) {
+            concurrentHashMap = softReference.get();
+            if (concurrentHashMap == null && value != null) {
+                // 缓存被清理了，内存要捉襟见肘了，或者缓存的数据太大了，这个时候应该清理并关闭soft缓存
+                redisOrmLog.warn("soft reference have been cleaned up.");
+                int currentMissCount = softCacheMissCount.incrementAndGet();
+                if (currentMissCount >= templateConfig.getMaxSoftCacheMissCount()) {
+                    // 关闭缓存总开关
+                    templateConfig.setUseSoftCache(false);
+                    redisOrmLog.warn("soft cache have been closed.");
+                    return;
+                }
+                concurrentHashMap = new ConcurrentHashMap<>();
+                softReference = new SoftReference<>(concurrentHashMap);
+                softCacheMap.put(key1, softReference);
+            }
+        } else {
+            concurrentHashMap = null;
+        }
+        if (value == null) {
+            if (concurrentHashMap != null) {
+                String remove = concurrentHashMap.remove(key2);
+                if (remove != null) {
+                    redisOrmLog.debug("softCacheMap delete cache, key1:%s, key2:%s", key1, key2);
+                }
+            }
+        } else {
+            concurrentHashMap.put(key2, value);
+            redisOrmLog.debug("softCacheMap add cache, key1:%s, key2:%s, value:%s", key1, key2, value);
+        }
+    }
 
     /**
      * 将字符串解析为对应类型的对象
@@ -341,6 +420,7 @@ public abstract class RedisOrmTemplateAdapter implements RedisOrmExecutorIF {
         }
         return redisOrmConverter.deserialize(fieldValueString, fieldTypes);
     }
+
 
     /** 从对象中获取对应字段的值转化后的字符串 */
     private String getStringValueFromInstance(Object instance, FieldDesc fieldDesc) throws RedisOrmDataException {
@@ -405,8 +485,26 @@ public abstract class RedisOrmTemplateAdapter implements RedisOrmExecutorIF {
     private boolean fillInstanceField(String redisHashKeyPrefix, Object instance, FieldDesc fieldDesc, String idString) throws RedisOrmDataException {
         String fieldKey = redisHashKeyPrefix + fieldDesc.getName();
         // 该字段序列化为字符串后的值
-        String fieldValueString = hGet(fieldKey, idString);
-        redisOrmLog.debug("Redis operation occurs: hGet, class:%s, fieldKey:%s, id:%s", instance.getClass().getName(), fieldKey, idString);
+        String fieldValueString;
+        if (templateConfig.isUseSoftCache() && fieldDesc.isUseSoftCache()) {
+            // 该字段使用soft缓存
+            fieldValueString = getValueFromCache(fieldKey, idString);
+            if (fieldValueString == null) {
+                // 缓存中没有拿到，从数据拿取
+                fieldValueString = hGet(fieldKey, idString);
+                redisOrmLog.debug("Redis operation occurs: hGet, class:%s, fieldKey:%s, id:%s", instance.getClass().getName(), fieldKey, idString);
+                if (fieldValueString == null) {
+                    // 删除该缓存
+                    addOrUpdateCache(fieldKey, idString, null);
+                } else {
+                    // 放入缓存
+                    addOrUpdateCache(fieldKey, idString, fieldValueString);
+                }
+            }
+        } else {
+            fieldValueString = hGet(fieldKey, idString);
+            redisOrmLog.debug("Redis operation occurs: hGet, class:%s, fieldKey:%s, id:%s", instance.getClass().getName(), fieldKey, idString);
+        }
         Class<?> instanceClass = instance.getClass();
         Object fieldValue = parseStringToObject(fieldValueString, fieldDesc);
         if (fieldValue == null) {
@@ -428,6 +526,20 @@ public abstract class RedisOrmTemplateAdapter implements RedisOrmExecutorIF {
             throw new RedisOrmDataException(String.format("class: %s field:%s set value failed", instanceClass, fieldDesc.getName()), e);
         }
         return true;
+    }
+
+    /**
+     * 获取缓存数据
+     */
+    private String getValueFromCache(String key1, String key2) {
+        SoftReference<ConcurrentHashMap<String, String>> softReference = softCacheMap.get(key1);
+        if (softReference != null) {
+            ConcurrentHashMap<String, String> map = softReference.get();
+            if (map != null) {
+                return map.get(key2);
+            }
+        }
+        return null;
     }
 
     private String getRedisKeyPrefix(String dataKeyPrefix, String globalNS, String namespace, String classNameAlia) {

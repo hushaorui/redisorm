@@ -134,4 +134,9 @@ public interface RedisOrmExecutorIF {
         deleteAll("", pojoClass);
     }
 
+    /**
+     * 清空软引用缓存
+     */
+    void clearSoftCache();
+
 }

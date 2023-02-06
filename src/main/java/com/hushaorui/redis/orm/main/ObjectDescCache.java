@@ -2,10 +2,7 @@ package com.hushaorui.redis.orm.main;
 
 import com.hushaorui.redis.orm.common.ReferenceBoolean;
 import com.hushaorui.redis.orm.common.ReferenceString;
-import com.hushaorui.redis.orm.common.anno.RedisOrmId;
-import com.hushaorui.redis.orm.common.anno.RedisOrmIgnore;
-import com.hushaorui.redis.orm.common.anno.RedisOrmObj;
-import com.hushaorui.redis.orm.common.anno.RedisOrmProp;
+import com.hushaorui.redis.orm.common.anno.*;
 import com.hushaorui.redis.orm.common.data.ClassDesc;
 import com.hushaorui.redis.orm.common.data.FieldDesc;
 import com.hushaorui.redis.orm.exception.RedisOrmJsonException;
@@ -306,6 +303,8 @@ class ObjectDescCache {
         RedisOrmId redisOrmId = field.getDeclaredAnnotation(RedisOrmId.class);
         // 字段注解
         RedisOrmProp redisOrmProp = field.getDeclaredAnnotation(RedisOrmProp.class);
+        // soft缓存注解
+        RedisOrmSoftCache redisOrmSoftCache = field.getDeclaredAnnotation(RedisOrmSoftCache.class);
         // 该字段是否是id
         isIdField.value = redisOrmId != null;
         if (isIdField.value && redisOrmProp != null) {
@@ -333,6 +332,8 @@ class ObjectDescCache {
             classDesc.setIdFieldDesc(fieldDesc);
         }
         fieldDesc.setIdField(isIdField.value);
+        // id默认使用soft缓存
+        fieldDesc.setUseSoftCache(isIdField.value || redisOrmSoftCache != null);
 
     }
 

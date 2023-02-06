@@ -21,6 +21,10 @@ public class RedisOrmTemplateConfig {
     private PrintStream logPrintStream = System.out;
     /** 打印日志的级别 NONE为不打印 */
     private String logLevel = "DEBUG"; // DEBUG INFO WARN ERROR NONE
+    /** 是否使用软引用缓存，默认使用 */
+    private boolean useSoftCache = true;
+    /** soft缓存最大miss次数 */
+    private int maxSoftCacheMissCount = 10;
     /** 是否忽略错误的字段名称，忽略后只会打印error日志而不会直接抛出异常 */
     private boolean ignoreFieldNotFound;
     /** 类型解析器，key为需要转换的类型的全类名 */
@@ -99,6 +103,12 @@ public class RedisOrmTemplateConfig {
     public void setLogLevel(String logLevel) {
         this.logLevel = logLevel;
     }
+    public boolean isUseSoftCache() {
+        return useSoftCache;
+    }
+    public void setUseSoftCache(boolean useSoftCache) {
+        this.useSoftCache = useSoftCache;
+    }
     public Map<String, RedisOrmConverter<?>> getConverters() {
         return converters;
     }
@@ -122,5 +132,11 @@ public class RedisOrmTemplateConfig {
     }
     public void setIgnoreFieldNotFound(boolean ignoreFieldNotFound) {
         this.ignoreFieldNotFound = ignoreFieldNotFound;
+    }
+    public int getMaxSoftCacheMissCount() {
+        return maxSoftCacheMissCount;
+    }
+    public void setMaxSoftCacheMissCount(int maxSoftCacheMissCount) {
+        this.maxSoftCacheMissCount = maxSoftCacheMissCount;
     }
 }
